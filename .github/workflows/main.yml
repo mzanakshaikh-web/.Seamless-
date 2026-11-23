@@ -1,0 +1,123 @@
+name: Build Seamless APK
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "seamless.zip"
+      - ".github/workflows/main.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seamless-android-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check that the project ZIP exists
+        shell: bash
+        run: |
+          if [ ! -f seamless.zip ]; then
+            echo "::error::seamless.zip was not found in the repository root."
+            exit 1
+          fi
+
+      - name: Extract Seamless project
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/project"
+          unzip -q seamless.zip -d "$GITHUB_WORKSPACE/project"
+
+          WRAPPER="$(find "$GITHUB_WORKSPACE/project" -type f -name gradlew -print -quit)"
+          if [ -z "$WRAPPER" ]; then
+            echo "::error::No gradlew was found inside seamless.zip. The ZIP must contain a complete Android Gradle project and its Gradle wrapper."
+            echo "ZIP contents:"
+            unzip -l seamless.zip | head -200
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$(dirname "$WRAPPER")" >> "$GITHUB_ENV"
+          echo "Found Gradle project at: $(dirname "$WRAPPER")"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
+          yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        env:
+          ANDROID_NDK_VERSION: "26.3.11579264"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace clean assembleRelease
+
+      - name: Find and prepare APK
+        id: apk
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          APK="$(find . -type f -path '*/build/outputs/apk/*/*.apk' \
+            ! -name '*-androidTest*.apk' -print | head -1)"
+
+          if [ -z "$APK" ]; then
+            echo "::error::Gradle completed but no APK was found under build/outputs/apk."
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/release-files"
+          cp "$APK" "$GITHUB_WORKSPACE/release-files/Seamless.apk"
+          echo "apk_path=$GITHUB_WORKSPACE/release-files/Seamless.apk" >> "$GITHUB_OUTPUT"
+
+          if unzip -l "$APK" | grep -q 'lib/arm64-v8a/libseamless_whisper.so'; then
+            echo "LYRICS_STATUS=Included (arm64-v8a Whisper native library found)" >> "$GITHUB_ENV"
+          else
+            echo "LYRICS_STATUS=Not detected in this APK (check the app's externalNativeBuild/CMake configuration)" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seamless-APK
+          path: release-files/Seamless.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish APK in GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: seamless-build-${{ github.run_number }}
+          name: Seamless Android build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Automated Android build of Seamless.
+
+            Whisper on-device lyrics engine: ${{ env.LYRICS_STATUS }}
+
+            Download **Seamless.apk** below.
+          files: release-files/Seamless.apk
+          fail_on_unmatched_files: true
