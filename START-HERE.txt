@@ -1,0 +1,26 @@
+SEAMLESS 5.0 - UPLOAD STEPS (new GitHub repo)
+
+You now have 3 files: seamless.zip, main.yml, START-HERE.txt
+
+1. Create a new empty repository on GitHub.
+
+2. Upload the project:
+   Add file > Upload files > choose seamless.zip (the zip file itself - do NOT extract it)
+   > Commit changes (to the main branch).
+
+3. Add the build workflow:
+   Add file > Create new file
+   In the name box type exactly:  .github/workflows/main.yml
+   Open main.yml from this folder, copy ALL of it, paste it into the big box.
+   > Commit changes.
+
+4. Open the Actions tab. "Build Seamless APK" starts by itself.
+   Wait 10-15 minutes for the green tick.
+
+5. Open your repo's Releases section (right side of the repo page,
+   or add /releases to the repo address).
+   Tap "Seamless (latest build)" > Assets > Seamless.apk
+   That is the real APK (no zip). Install it.
+
+The release text says whether the on-device lyrics engine was included.
+If it says WITHOUT, send the Actions log zip to Claude.
